@@ -193,6 +193,7 @@ for iVoxBlock = 1:nSubICBlocks
         estimate = (Xfull'*Xfull)^(-1) * Xfull' * squeeze(singleSubjectICs(:,v,:))';
         beta(:,:,voxRange(v)) = estimate(2:(p), :);
         S0(:,voxRange(v)) = estimate(1,:)';
+        aggregate_IC_map(:, v) = mean(Xfull * estimate); % do this here to avoid reconstruction
         %epsilon2temp(:,voxRange(v),:) = singleSubjectICs(:,v,:) - reshape( (Xfull * estimate)', [q,1,N] );
     end
     %sigma2_sq = var(reshape(epsilon2temp, [q,V*N]), 0, 2);
@@ -212,7 +213,7 @@ for iGroup = 1:nBlocks
         GAi = G(istart:iend, :) * Agrp;
         disp('this indexing is for wrong level')
         singleSubjectIC = pinv(GAi) * stackedStage2Data(istart:iend, :);
-        aggregate_IC_map = aggregate_IC_map + 1/N * singleSubjectIC ;
+        %aggregate_IC_map = aggregate_IC_map + 1/N * singleSubjectIC ;
         % Generate the corresponding Ytilde variable, which is the single subject
         %     data reduced to q ICs.
         image = load_nii(niifiles{index}); res = reshape(image.img,[], k)';
