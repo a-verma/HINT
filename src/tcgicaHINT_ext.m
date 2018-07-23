@@ -1,4 +1,4 @@
-function [ theta, beta, grpSig, s0_agg, PCAquant ] = tcgicaHINT_ext(niifiles, maskf, validVoxels,...
+function [ s0_agg, PCAquant ] = tcgicaHINT_ext(niifiles, maskf, validVoxels,...
     X, numPCA, q, N, time_num, V, prefix)
 
 %% Stages:
@@ -164,11 +164,6 @@ for iVoxBlock = 1:nSubICBlocks
             subjIndex = subjIndex + 1;
             % index of the dewhiten matrix for this subj
             sistart = (iSubj-1) * numPCA + 1; siend = iSubj*numPCA ;
-            %disp('is this right if not an even number per gorup???')
-            %GAi = G(gstart:gend, :) * Agrp;
-            %disp('these are not actually single subj ICs, need to go backwards one more step')
-            %singleSubjectICs(:,:,subjIndex) = pinv(GAi) * stackedStage2Data(gstart:gend, voxStart:voxEnd);
-            %disp('doing it the right way:')
             HDGAi =  squeeze(stage1deWhite(:,:,subjIndex)) * ...
                 squeeze(stage2deWhite(sistart:siend,:,iGroup)) *...
                 G(gstart:gend, :) * Agrp;
@@ -199,56 +194,56 @@ for iVoxBlock = 1:nSubICBlocks
     %sigma2_sq = var(reshape(epsilon2temp, [q,V*N]), 0, 2);
 end    
 
-disp('Sigma2_sq not estimated')
-%% Reconstruct for each N
-singleSubjectIC = zeros(q, voxPerBlock(iVoxBlock));
-index = 0; % index controlling subjects
-for iGroup = 1:nBlocks
-    istart = -numPCA + 1; iend = 0;
-    gstart = glength*(iGroup-1) + 1; gend = glength*iGroup;
-    for iSubj = 1:subjPerBlock(iGroup)
-        % Recover the subjects IC
-        index = index + 1; % increment subject
-        istart = istart + numPCA; iend = iend +  numPCA;
-        GAi = G(istart:iend, :) * Agrp;
-        disp('this indexing is for wrong level')
-        singleSubjectIC = pinv(GAi) * stackedStage2Data(istart:iend, :);
-        %aggregate_IC_map = aggregate_IC_map + 1/N * singleSubjectIC ;
-        % Generate the corresponding Ytilde variable, which is the single subject
-        %     data reduced to q ICs.
-        image = load_nii(niifiles{index}); res = reshape(image.img,[], k)';
-        % center the data
-        X_tilde_all = res(:,validVoxels); [X_tilde_all, ] = remmean(X_tilde_all);
-        Ytilde = redICYWhite(:,:, index) * X_tilde_all;
-        % Calculate the estimate for the mixing matrix
-        cS_i = singleSubjectIC; %sInd = q*(iSubj-1)+1; eInd = iSubj*q;
-        A_tempi = (cS_i * cS_i')^(-1) * cS_i * Ytilde';
-        Asym = A_tempi';
-        A(:,:,index) = Asym*real(inv(Asym'*Asym)^(1/2)); 
-    end
-end
+% disp('Sigma2_sq not estimated')
+% %% Reconstruct for each N
+% singleSubjectIC = zeros(q, voxPerBlock(iVoxBlock));
+% index = 0; % index controlling subjects
+% for iGroup = 1:nBlocks
+%     istart = -numPCA + 1; iend = 0;
+%     gstart = glength*(iGroup-1) + 1; gend = glength*iGroup;
+%     for iSubj = 1:subjPerBlock(iGroup)
+%         % Recover the subjects IC
+%         index = index + 1; % increment subject
+%         istart = istart + numPCA; iend = iend +  numPCA;
+%         GAi = G(istart:iend, :) * Agrp;
+%         disp('this indexing is for wrong level')
+%         singleSubjectIC = pinv(GAi) * stackedStage2Data(istart:iend, :);
+%         %aggregate_IC_map = aggregate_IC_map + 1/N * singleSubjectIC ;
+%         % Generate the corresponding Ytilde variable, which is the single subject
+%         %     data reduced to q ICs.
+%         image = load_nii(niifiles{index}); res = reshape(image.img,[], k)';
+%         % center the data
+%         X_tilde_all = res(:,validVoxels); [X_tilde_all, ] = remmean(X_tilde_all);
+%         Ytilde = redICYWhite(:,:, index) * X_tilde_all;
+%         % Calculate the estimate for the mixing matrix
+%         cS_i = singleSubjectIC; %sInd = q*(iSubj-1)+1; eInd = iSubj*q;
+%         A_tempi = (cS_i * cS_i')^(-1) * cS_i * Ytilde';
+%         Asym = A_tempi';
+%         A(:,:,index) = Asym*real(inv(Asym'*Asym)^(1/2)); 
+%     end
+% end
+% 
+% disp('single subject error not calculated')
+% 
+% % Initial Guess: fit a Gaussian mixture
+% m=2;
+% 
+% for j =1:q
+%     GMModel = fitgmdist(S0(j,:)' ,m+1);
+%     id = find(abs(GMModel.mu) == max(abs(GMModel.mu)));
+%     theta.miu3(1+m*(j-1): m*j, 1) =[GMModel.mu(id), 0];
+%     idzero = abs(GMModel.mu) == min(abs(GMModel.mu));
+%     theta.sigma3_sq(1+m*(j-1): m*j, 1) = [GMModel.Sigma(id), GMModel.Sigma(idzero)];
+%     theta.pi(1+m*(j-1): m*j, 1)  =[GMModel.PComponents(id), 1-GMModel.PComponents(id)];
+% end
 
-disp('single subject error not calculated')
+% % create the final variables to return (beta already created)
+% theta.sigma1_sq = 9999;
+% theta.sigma2_sq = 9999;
+% theta.A = A;
+% grpSig = S0;
 
-% Initial Guess: fit a Gaussian mixture
-m=2;
-
-for j =1:q
-    GMModel = fitgmdist(S0(j,:)' ,m+1);
-    id = find(abs(GMModel.mu) == max(abs(GMModel.mu)));
-    theta.miu3(1+m*(j-1): m*j, 1) =[GMModel.mu(id), 0];
-    idzero = abs(GMModel.mu) == min(abs(GMModel.mu));
-    theta.sigma3_sq(1+m*(j-1): m*j, 1) = [GMModel.Sigma(id), GMModel.Sigma(idzero)];
-    theta.pi(1+m*(j-1): m*j, 1)  =[GMModel.PComponents(id), 1-GMModel.PComponents(id)];
-end
-
-% create the final variables to return (beta already created)
-theta.sigma1_sq = 9999;
-theta.sigma2_sq = 9999;
-theta.A = A;
-grpSig = S0;
-
-disp('Change to icasig')
+% disp('Change to icasig')
 %s0_agg = S0;
 s0_agg = aggregate_IC_map;
 %s0_agg = icasig;
