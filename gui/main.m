@@ -720,7 +720,7 @@ function varargout = main(varargin)
             % Check if a runinfo file has been loaded
             % if so, preprocessing will need to be re-run
             proceed = 0;
-            if ~isfield(data, 'ytilde')
+            if ~isfield(data, 'Ytilde')
                 redoPreproc = questdlg(['HINT is detecting that a runinfo'...
                     'file has been loaded instead of the raw data.'...
                     'Re-estimating the intitial guess will require'...
@@ -746,17 +746,28 @@ function varargout = main(varargin)
                 numberOfPCs = findobj('Tag', 'numPCA');
                 data.prefix = get(findobj('Tag', 'prefix'), 'String');
                 data.outpath = get(findobj('Tag', 'analysisFolder'), 'String');
+                
+                useSetting = 'GIFTsss';
 
                 % Perform GIFT
                 % Generate the text parameter file used by GIFT
                 hcicadir = pwd;
                 % run GIFT to get the initial guess. This function also outputs nifti files
                 % with initial values.
-                [ data.theta0, data.beta0, data.s0, s0_agg ] = runGIFT(data.niifiles, data.maskf, ...
+                if strcmp(useSetting, 'GIFT')
+                [ data.theta0, data.beta0, data.s0, s0_agg, data.PCAquant ] = runGIFT(data.niifiles, data.maskf, ...
                     get(findobj('Tag', 'prefix'), 'String'),...
                     get(findobj('Tag', 'analysisFolder'), 'String'),...
                     str2double(numberOfPCs.String),...
                     data.N, data.q, data.X, data.Ytilde, hcicadir);
+                else
+                    V = size(data.validVoxels, 1);
+                    temp = data.Ytilde;
+                    [ data.theta0, data.beta0, data.s0, s0_agg, data.PCAquant ] = tcgicaHINT_ext(data.niifiles,...
+                        data.maskf, data.validVoxels,...
+                        data.X, str2double(numberOfPCs.String), data.q,...
+                        data.N, data.time_num, V, data.prefix);
+                end
 
                 % Write to log file that initial guess stage is complete.
                 if (writelog == 1)
@@ -774,8 +785,8 @@ function varargout = main(varargin)
                     newIC = template;
                     newIC(data.validVoxels) = s0_agg(ic, :)';
                     IC = reshape(newIC, data.voxSize);
-                    newIC = make_nii(IC)
-                    newIC.hdr.hist.originator = anat.hdr.hist.originator
+                    newIC = make_nii(IC);
+                    newIC.hdr.hist.originator = anat.hdr.hist.originator;
                     save_nii(newIC, [get(findobj('Tag', 'analysisFolder'), 'String') '/' get(findobj('Tag', 'prefix'), 'String') '_iniIC_' num2str(ic) '.nii' ], 'IC');
                 end
 
@@ -869,10 +880,18 @@ function varargout = main(varargin)
         
         % Call function to re-estimate the initial values for the hc-ica
         % algorithm based on the selected ICs
-        [data.thetaStar, data.beta0Star, data.YtildeStar, data.CmatStar] = ...
-            reEstimateIniGuess( data.N,...
-            str2double(get(findobj('tag', 'numPCA'), 'String')), data.outpath,...
-            data.prefix, data.X, data.maskf, data.validVoxels )
+        type = 'GIFTss';
+        if strcmp(type, 'GIFT')
+            [data.thetaStar, data.beta0Star, data.YtildeStar, data.CmatStar] = ...
+                reEstimateIniGuess( data.N,...
+                str2double(get(findobj('tag', 'numPCA'), 'String')), data.outpath,...
+                data.prefix, data.X, data.maskf, data.validVoxels )
+        else
+            % Remove Noise ICs
+            [data.YtildeStar, data.CmatStar] = removeUnwantedICs(keeplist,...
+                data.PCAquant, data.niifiles);
+            % Recalc Based On Reduced Data
+        end
         
         % Fill in the progress bar to let the user know that they can
         % move on to the analysis

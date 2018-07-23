@@ -63,7 +63,9 @@ function [theta_new, beta_new, z_mode, subICmean, subICvar,...
     for i = 1:N
         A((i-1)*T+1 : (i-1)*T+T, (i-1)*q+1 : (i-1)*q+q) = theta.A(:,:,i);
         C_inv(:,i) = 1 ./ C_matrix_diag((T*(i-1)+1) : (T*i));
+        %C_inv(:,i) = ones(q, 1);
     end
+    %disp('proper cinv calc turned off')
 
     B = kron( ones(N, 1), eye(q));
     W2 = [ eye(N * q), B];
@@ -71,6 +73,8 @@ function [theta_new, beta_new, z_mode, subICmean, subICvar,...
     
     % First level variance
     Sigma1 = diag( C_matrix_diag .* theta.sigma1_sq);
+    %disp('cmat diag turned off')
+    %Sigma1 = diag( theta.sigma1_sq);
     Sigma1_inv = diag(1 ./ diag(Sigma1));
     
     % Second level variance
@@ -267,6 +271,20 @@ function [theta_new, beta_new, z_mode, subICmean, subICvar,...
     theta_new.sigma2_sq = 1 / double(N * V) * diag( sigma2_sq_all); 
 
     % Update mixture of gaussians
+%     pi1 = theta_new.pi;
+%     miu31 = theta_new.miu3;
+%     sigma31 = theta_new.sigma3_sq;
+%     for l = 1:q
+%         act = find( VoxelIC == l);
+%         nois = find( VoxelIC ~= l);
+%         pi1(1 + (l-1) * m) =  ( length(act) + 1) / ( length(nois) + length(act) + 1);
+%         pi1(2 + (l-1) * m) =  length(nois) / ( length(nois) + length(act) + 1);
+%         miu31(1 + (l-1) * m) = mean( grpICmean(l, act));
+%         miu31(2 + (l-1) * m) = mean( grpICmean(l, nois));
+%         sigma31(1 + (l-1) * m) = mean( grpICvar(l, l, act));
+%         sigma31(2 + (l-1) * m) = mean( grpICvar(l, l, nois));
+%     end
+%     sigma31 = sigma31 - miu31 .^ 2;
     for l = 1:q
         act = find( VoxelIC == l);
         nois = find( VoxelIC ~= l);
@@ -280,7 +298,42 @@ function [theta_new, beta_new, z_mode, subICmean, subICvar,...
     theta_new.sigma3_sq = theta_new.sigma3_sq - theta_new.miu3 .^ 2;
     
     % Update that uses the probabilities
- 
+%     % Calculations using all of the probabilites
+%     maxVal = max(probBelong,[], 3);
+%     regProb_denom = maxVal + log(sum( exp( probBelong - maxVal ), 3 ));
+%     regProb = probBelong - regProb_denom;
+%     normalizedProb = exp(regProb);
+%     new_pi_temp = sum( normalizedProb , 2) / V;
+%     new_pi = new_pi_temp(1:q);
+%     new_noise_prob = 1 - new_pi;
+%     % Now calculate the new values for miu3 using paper formula
+%     newICMeans = squeeze(1/(V*new_pi)) .*...
+%         sum(squeeze(normalizedProb(:,:,1:q))' .* grpICmean, 2);
+%     newNoiseMeans = squeeze(1/(V*new_noise_prob)) .*...
+%         grpICmean * squeeze(normalizedProb(:,:,q+1))';
+%     % Now calculate the new values for sigma3 using paper formula
+%     newICExpSq = squeeze(1./(V*new_pi)) .*...
+%         sum(squeeze(normalizedProb(:,:,1:q))' .* grpICmean.^2, 2);
+%     newNoiseExpSq = squeeze(1/(V*new_noise_prob)) .*...
+%         grpICmean.^2 * squeeze(normalizedProb(:,:,q+1))';
+%     newICVar = newICExpSq - newICMeans.^2;
+%     newNoiseVar = newNoiseExpSq - newNoiseMeans.^2;
+%     for l = 1:q
+%         theta_new.pi(1 + (l-1) * m) =  new_pi(l);
+%         theta_new.pi(2 + (l-1) * m) =  new_noise_prob(l);
+%         theta_new.miu3(1 + (l-1) * m) = newICMeans(l);
+%         theta_new.miu3(2 + (l-1) * m) = newNoiseMeans(l);
+%         theta_new.sigma3_sq(1 + (l-1) * m) = newICVar(l);
+%         theta_new.sigma3_sq(2 + (l-1) * m) = newNoiseVar(l);
+%     end   
+    
+%     disp('Probabilities:')
+%     disp([theta_new.pi, pi1]')
+%     disp('Means:')
+%     disp([theta_new.miu3, miu31]')
+%     disp('Variance Estimates:')
+%     disp([theta_new.sigma3_sq, sigma31]')
+    
     % handle NaN in previous iteration
     nanid = find( isnan( theta_new.miu3));
     if ~ isempty( nanid)
