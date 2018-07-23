@@ -12,13 +12,15 @@ function [ theta, beta, grpSig, s0_agg, PCAquant ] = tcgicaHINT_ext(niifiles, ma
 PCAquant = struct();
 T = time_num;
 p = size(X, 2) + 1;
-%maxBytes = 1e9; disp('change max bytes to 8e9!!!')
-maxBytes = 10e9; disp('change max bytes to 8e9!!!')
+maxBytes = 5e6; disp('change max bytes to 8e9!!!')
+%maxBytes = 10e9; disp('change max bytes to 8e9!!!')
 
 %% Preallocate for final things to return
 beta = zeros(p-1, q, V);
 S0 = zeros(q, V);
 A = zeros(q,q,N);
+% Storage for the aggregate map
+aggregate_IC_map = zeros(q, V);
 
 %% Determine the required number of blocks based on the requested number of PCs
 bytesRequired = 8 * numPCA * V * N;
@@ -92,29 +94,32 @@ for iGroup = 1:nBlocks
     end
 
     %% Stage 2 - Perform the second stage of reduction on the block of data
+    if nBlocks > 1
+        [U_incr_2, D_incr_2] = pcamat(stackedPCAData);
+        lambda = sort(diag(D_incr_2),'descend');
+        if numPCA2 < numPCA
+           sigma2_ML = sum(lambda(numPCA2+1:length(lambda))) / (length(lambda)-numPCA2);   
+        else
+           sigma2_ML = 0;
+        end
+        U_q = U_incr_2(:,(size(U_incr_2,2)-numPCA2+1):size(U_incr_2,2));
+        D_q = diag(D_incr_2((size(U_incr_2,2)-numPCA2+1):size(U_incr_2,2),...
+           (size(U_incr_2,2)-numPCA2+1):size(U_incr_2,2)));
 
-    [U_incr_2, D_incr_2] = pcamat(stackedPCAData);
-    lambda = sort(diag(D_incr_2),'descend');
-    if numPCA2 < numPCA
-        sigma2_ML = sum(lambda(numPCA2+1:length(lambda))) / (length(lambda)-numPCA2);   
-    else
-        sigma2_ML = 0;
+        ng = numPCA * subjPerBlock(iGroup); % Account for possible different group size
+        stage2White(:,1:ng,iGroup) = diag((D_q-sigma2_ML).^(-1/2)) * U_q';
+        stage2deWhite(1:ng,:,iGroup) = U_q * diag((D_q-sigma2_ML) .^ (1/2));
+
+        % Store the 2nd stage results
+        storeStart = (iGroup-1)*numPCA2 + 1;
+        storeEnd = numPCA2 * iGroup;
+        stackedStage2Data(storeStart:storeEnd, :) = stage2White(:,1:ng,iGroup) * stackedPCAData;
+    else % handle typical case where blocks not required
+        stage2White = eye(numPCA2);
+        stage2deWhite = eye(numPCA2);
+        stackedStage2Data = stackedPCAData;
     end
-    U_q = U_incr_2(:,(size(U_incr_2,2)-numPCA2+1):size(U_incr_2,2));
-    D_q = diag(D_incr_2((size(U_incr_2,2)-numPCA2+1):size(U_incr_2,2),...
-        (size(U_incr_2,2)-numPCA2+1):size(U_incr_2,2)));
-
-    ng = numPCA * subjPerBlock(iGroup); % Account for possible different group size
-    stage2White(:,1:ng,iGroup) = diag((D_q-sigma2_ML).^(-1/2)) * U_q';
-    stage2deWhite(1:ng,:,iGroup) = U_q * diag((D_q-sigma2_ML) .^ (1/2));
-
-    % Store the 2nd stage results
-    storeStart = (iGroup-1)*numPCA2 + 1;
-    storeEnd = numPCA2 * iGroup;
-    stackedStage2Data(storeStart:storeEnd, :) = stage2White(:,1:ng,iGroup) * stackedPCAData;
     
-    stackedStage2Data = stackedPCAData;
-
 end % end of loop over blocks
 
 %% Stage 3 - Perform PCA down to q components
@@ -131,9 +136,6 @@ groupPCA_X = Ginv * stackedStage2Data; % this is X that the ICA is performed on
 %% Stage 4 - ICA
 [icasig, Amix, W] = fastica_full(groupPCA_X, 'numOFIC', q);
 Agrp = Amix;
-
-% view icasig
-
 
 %% Reconstruct the single subject matrices - Over Blocks of Voxels
 
@@ -155,20 +157,26 @@ for iVoxBlock = 1:nSubICBlocks
 
     % Loop through and create the subject level ICs for the relevant voxels
     glength = size(G, 1) / nBlocks;
+    subjIndex = 0; % track the current subject
     for iGroup = 1:nBlocks
-        istart = -numPCA + 1; iend = 0;
-        disp('this is wrong index for stacked stage 2')
-        gstart = glength*(iGroup-1) + 1; gend = glength*iGroup;
+        gstart = glength*(iGroup-1) + 1; gend = glength*iGroup; % indices of G
         for iSubj = 1:subjPerBlock(iGroup)
-            istart = istart + numPCA; iend = iend +  numPCA;
-            %HGAi = squeeze(H(istart:iend, :, iGroup)) * G(gstart:gend, :) * Agrp;
+            subjIndex = subjIndex + 1;
+            % index of the dewhiten matrix for this subj
+            sistart = (iSubj-1) * numPCA + 1; siend = iSubj*numPCA ;
+            %disp('is this right if not an even number per gorup???')
             %GAi = G(gstart:gend, :) * Agrp;
-            GAi = G(istart:iend, :) * Agrp;
-            %singleSubjectICs(:,:,iSubj) = pinv(GAi) *...
-                %squeeze(stage2White(istart:iend, :, iGroup))'  *...
-                %stackedStage2Data(istart:iend, voxStart:voxEnd);
-            disp('i think this is also the wrong stage 2 index, pca2?')
-            singleSubjectICs(:,:,iSubj) = pinv(GAi) * stackedStage2Data(istart:iend, voxStart:voxEnd);
+            %disp('these are not actually single subj ICs, need to go backwards one more step')
+            %singleSubjectICs(:,:,subjIndex) = pinv(GAi) * stackedStage2Data(gstart:gend, voxStart:voxEnd);
+            %disp('doing it the right way:')
+            HDGAi =  squeeze(stage1deWhite(:,:,subjIndex)) * ...
+                squeeze(stage2deWhite(sistart:siend,:,iGroup)) *...
+                G(gstart:gend, :) * Agrp;
+            % Original subject data to whiten
+            image = load_nii(niifiles{subjIndex}); res = reshape(image.img,[], k)';
+            % Center the data
+            X_tilde_all = res(:,validVoxels); [X_tilde_all, ] = remmean(X_tilde_all);
+            singleSubjectICs(:,:,subjIndex) = pinv(HDGAi) * X_tilde_all(:, voxStart:voxEnd);
         end
     end
     
@@ -188,14 +196,11 @@ for iVoxBlock = 1:nSubICBlocks
         %epsilon2temp(:,voxRange(v),:) = singleSubjectICs(:,v,:) - reshape( (Xfull * estimate)', [q,1,N] );
     end
     %sigma2_sq = var(reshape(epsilon2temp, [q,V*N]), 0, 2);
-
 end    
 
 disp('Sigma2_sq not estimated')
 %% Reconstruct for each N
 singleSubjectIC = zeros(q, voxPerBlock(iVoxBlock));
-% Storage for the aggregate map
-aggregate_IC_map = zeros(q, voxPerBlock(iVoxBlock));
 index = 0; % index controlling subjects
 for iGroup = 1:nBlocks
     istart = -numPCA + 1; iend = 0;
@@ -245,6 +250,7 @@ grpSig = S0;
 disp('Change to icasig')
 %s0_agg = S0;
 s0_agg = aggregate_IC_map;
+%s0_agg = icasig;
 
 % PCA whitening and dewhitening matrices for working backwards to ytilde
 PCAquant.redICYWhite = redICYWhite;
