@@ -146,7 +146,6 @@ G = pinv(Ginv);
 for iVoxBlock = 1:nSubICBlocks 
 
     % Create storage for this round of subject level ICs
-    disp('might should be n in group')
     singleSubjectICs = zeros(q, voxPerBlock(iVoxBlock), N);
     voxStart = 1;
     if iVoxBlock > 1
